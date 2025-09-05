@@ -1,6 +1,7 @@
 # Project 1 - PsycheMoney Bot (A Simple RAG Chatbot)
 
-This project is a **Retrieval-Augmented Generation (RAG) chatbot** built using LangChain, Groq LLMs, and ChromaDB. The bot is designed to answer questions based on the book *The Psychology of Money*. It retrieves relevant passages from the text and generates human-like, contextual answers.
+This project is a Retrieval-Augmented Generation (RAG) chatbot built using LangChain, Groq LLMs, and ChromaDB. The chatbot has been implemented with a chain-based design, where document retrieval, context assembly, and response generation are structured into clear, sequential steps. 
+It is designed to answer questions based on the book The Psychology of Money by retrieving relevant passages from the text, feeding them through the chain, and generating human-like, contextual answers.
 
 The project is beginner-friendly and structured for easy setup.
 (This project dosen't implement session-based memory, intermediate reasoning steps, basic logging or observability features)
