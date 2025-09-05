@@ -1,0 +1,24 @@
+# Python cache
+__pycache__/
+*.py[cod]
+Project1-PsycheMoneybot/.idea/
+
+# Virtual env
+venv/
+env/
+ragenv/
+chatenv/
+
+# Environment files
+.env
+
+# Databases
+*.sqlite3
+*.db
+*.bin
+*.pickle
+
+# IDE / OS files
+.idea/
+.vscode/
+.DS_Store
