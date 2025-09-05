@@ -134,8 +134,10 @@ So, what's the takeaway? It's not just about making good money; it's about creat
 
 ### Example 2
 
-User: *"I want to be an expert in Agentic AI, should i take the course from ready tensor??"*
-Bot: *"This chatbot helps explain ideas from *The Psychology of Money*. Please provide a question related to money or finance."*
+User: "I want to be an expert in Agentic AI, should i take the course from ready tensor??"
+
+Bot: "This chatbot helps explain ideas from *The Psychology of Money*. Please provide a question related to money or finance."
+
 ---
 
 ## 🛠️ Tech Stack
