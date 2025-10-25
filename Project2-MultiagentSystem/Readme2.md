@@ -7,7 +7,7 @@ This project is a **multi-agent system** designed to automate everyday tasks on 
 The agents collaborate to:
 
 * Fetch and filter **tech & personal development news** from reliable sources.
-* Collect tech updates from **Telegram channels**.
+* Collect tech updates from **messaging apps channels(This project uses telegram)**.
 * Manage **local files and applications** for better organization and performance.
 * Monitor and optimize **system processes & RAM usage**.
 
@@ -77,13 +77,22 @@ Works like a **smart Task Manager** with additional optimization features.
 
 ---
 
-## 👥 Agents in the System (Count: 5 Agents)
+## 👥 Agents in the System 
 
 1. 🌐 **SearchAgent** – Fetches reliable news and personal development content.
 2. 💬 **TelegramAgent** – Collects and filters updates from chosen Telegram folders.
 3. 📂 **FileManagerAgent** – Sorts Downloads, deletes safe empty folders.
 4. 🖥 **ProcessManagingAgent** – Tracks apps, manages processes, boosts RAM.
 5. 🤖 **OrchestratorAgent** – Manages all agents and schedules automation.
+
+| 🧩 **Agent Name**           | ⚡ **Trigger Type**                                                                                     | 🧠 **Inputs**                                                                                                      | 📤 **Outputs**                                                                                                                                                                                                                     | 🧭 **Special Notes**                                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 🌐 **SearchAgent**          | **Timed Trigger** – runs at specific times (e.g., 8 AM daily) or when user commands.                   | • Default news topics (Tech, Personal Development)  <br>• Optional custom topics via user message to Orchestrator. | • News list: each with **title**, **short summary**, and **source link**.                                                                                                                                                          | • Can fetch from HackerNews, TechCrunch, Reddit, etc. <br>• Auto-refreshes on schedule but user can override anytime. |
+| 💬 **TelegramAgent**        | **System State Trigger** – active while PC is on.                                                      | • Default keyword list (e.g., AI, Cloud, Startup). <br>• Telegram folders selected by user.                        | • Alerts for **incoming messages** in personal chats. <br>• **Filtered updates** from tech-related channels.                                                                                                                       | • Runs quietly in background. <br>• Can alert Orchestrator if message is suspicious/unusual.                          |
+| 📂 **FileManagerAgent**     | **Event Trigger** – activated when file changes occur (e.g., new download).                            | • Folder path to monitor (Downloads, Desktop, etc.) <br>• Sorting rules.                                           | • Automatically organizes new files into folders (media, docs, zips, etc.) <br>• Displays **candidate empty folders** for deletion and **asks confirmation** via Orchestrator before deleting.                                     | • Never touches system folders. <br>• Safe auto-cleaning behaviour.                                                   |
+| 🖥 **ProcessManagingAgent** | **Continuous + On-Demand Trigger** – always monitoring system; actions triggered by dashboard buttons. | • No manual input — actions triggered via UI buttons (Open app, End Task, RAM Boost).                              | • **App Usage Insights:** MFU/LRU list with launch count + active time. <br>• **Running Processes Overview:** list of non-background processes + RAM usage. <br>• **RAM Booster:** clears memory + junk files when button pressed. | • Avoids closing critical background/system processes. <br>• Acts as a sub-orchestrator for system maintenance tasks. |
+| 🤖 **OrchestratorAgent**    | **Reactive Trigger** – responds to both agent alerts and user chat.                                    | • Messages from user (commands, overrides). <br>• Alerts & outputs from all agents.                                | • Routes requests to right agent. <br>• Displays consolidated info on dashboard. <br>• Sends alerts and confirmations back to user.                                                                                                | • Only agent user directly interacts with. <br>• Overrides any automation on user command.                            |
+
 
 **Future Decomposition Note:**
 The **ProcessManagingAgent** can be split into three specialized agents for modularity:
