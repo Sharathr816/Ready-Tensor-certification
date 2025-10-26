@@ -1,38 +1,48 @@
 from langchain_groq import ChatGroq
-from langchain.agents import create_tool_calling_agent, AgentExecutor
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel
+from typing_extensions import TypedDict
 from tools.file_system_tool import file_system_access_tool
+from langgraph.graph import StateGraph, START, END
 
 load_dotenv()
 
-llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0)
-tools = [file_system_access_tool]
-prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            """
-            you are smart digital maid who is obedient to her master and fullfils anything he asks without performing extra chores.
-            """,
-        ),
-        ("human", "{query}"),
-        ]
-)
+class state(BaseModel):
+    output : str = ""
 
-'''agent runtime (like AgentExecutor or create_react_agent) is needed to
- read the model’s “tool call” output and actually runs the tool’s function.'''
-agent = create_tool_calling_agent(
-    llm=llm,
-    prompt=prompt,
-    tools=tools
-)
 
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)# verbose used to see internals of agent
+def fileManager(State: state):
+    llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0)
+    llm_with_tool = llm.bind_tools([file_system_access_tool])
+    #LangChain’s .invoke() doesn’t auto-execute tools. it returns message object(refer Agent_prac)
+    response = llm_with_tool.invoke('''scan my X: drive folder and provide the name of folders present there, scan out of
+     this project folder
+     ''')
 
-result = agent_executor.invoke({
-    "query": '''what kind of file is "MedicalCertificate" file and where is it present in X drive'''
-})
+    # If it requested a tool call, run the tool manually
+    if hasattr(response, "tool_calls") and response.tool_calls:
+        tool_call = response.tool_calls[0]
+        tool_name = tool_call["name"]
+        args = tool_call["args"]
 
-print(result["output"])
+        print(f"🔧 Tool called: {tool_name} with {args}")
+        tool_result = file_system_access_tool.func(**args)
+
+        # Step 3: Send tool result back to LLM for reflection
+        response = llm_with_tool.invoke(
+            f"Tool result: {tool_result}\nNow explain what you did within 100 words."
+        )
+
+    return {"output":response.content}
+
+
+
+
+
+
+
+
+
+
 
