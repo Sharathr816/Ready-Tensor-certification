@@ -1,3 +1,5 @@
+from os import write
+
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
@@ -5,7 +7,9 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 from typing import Annotated
-from tools import file_management
+from tools import scan_user_folders_across_drives
+
+from pathlib import Path
 import json
 load_dotenv()
 
@@ -18,7 +22,7 @@ class State(TypedDict):# used to define dictionary-like objects with fixed keys 
     process_sys_msg: str
     agent_choice: str
 
-tools = [file_management]
+tools = [scan_user_folders_across_drives]
 
 # Router
 def router(state:State):
@@ -36,7 +40,6 @@ def orchestor(state: State):
     clean = response.content.strip().removeprefix("```json").removesuffix("```").strip()
     data = json.loads(clean)
     print(data["processed_query"])
-
     return {"agent_choice": data["agent"], "processed_q_data": [HumanMessage(content=data["processed_query"])]}
 
 
@@ -46,8 +49,28 @@ def file_manager(state: State):
     llm_tool = file_llm.bind_tools(tools)
     response = llm_tool.invoke([
         SystemMessage(
-            content="""You are an assistant who helps user to understand how the files in his systems are organized. Help user by abiding by his requests related to file management operations.
-            you respond with the contents that relevant tool is capable of, dont provide any other responses """),
+            content="""You are a file organization assistant for Windows 10 or later systems.
+
+            Your responsibility is to help the user by recommending best file organizational practices in order to reduce clutter in their file system
+            by analyzing file structure and identifying organizational issues.
+            
+            IMPORTANT CONSTRAINTS:
+            - You do NOT modify, move, delete, or rename any files or folders.
+            - You ONLY analyze file structure and report issues.
+            - You do NOT reason about issues during scanning.
+            - You use tools exactly as instructed.
+            
+            AVAILABLE ACTIONS:
+            1. When the user provides a query, first you will use the scan tool to search for all user folders in the system.
+            
+            2. You will 
+            
+            3. 
+            
+            GOAL:
+            Your goal is to produce accurate, deterministic analysis of file organization
+            and resolve the clutter and file organizational problems present in user system.
+            """),
         *state["processed_q_data"] # * means expanding the list
     ])
     print("agent responded...")
@@ -63,19 +86,22 @@ def file_tools_node(state: State):
     # Execute each tool the agent requested
     for tool_call in last_message.tool_calls:
         tool = tool_registry[tool_call["name"]]
-        # print(tool_call["name"])
-        # print(tool_call["args"])
+        print(tool_call["name"])
+        print(tool_call["args"])
         result = tool.invoke(tool_call["args"])
 
         # Send the result back to the agent - appending the ToolMessage object
         tool_messages.append(ToolMessage(
-            content=str(result),
+            content=result,
             tool_call_id=tool_call["id"]
         ))
         # print(tool_messages)
-    print("agent successfully called tool...\n")
+    print("agent successfully called tools...\n")
 
     return {"processed_q_data": tool_messages}
+
+
+
 
 
 def process_manager(state: State):
@@ -109,10 +135,9 @@ initial_state = {
         parse it into a dictionary with the following key-value pairs...
         1. agent -  which can have value either "process" if query is related to process management work or "file" if query is related to file/dir management in system
         2. processed_query - processed user query which is clear and unambigous such that other llm can work without confusion"""),
-        HumanMessage(content="I want to know what are all there in X:\ drives musics and Pictures folders")
+        HumanMessage(content="I want the scanning of my C:\\Users drive")
     ]
 }
 # final output
 result = agent.invoke(initial_state)
 print(result["processed_q_data"][-1].content)
-print(result["processed_q_data"][-2].content)
