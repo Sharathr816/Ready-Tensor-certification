@@ -1,13 +1,13 @@
 from os import write
 
-from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage, AIMessage
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 from typing import Annotated
-from tools import scan_user_folders_across_drives
+from tools import scan_user_folders_across_drives, USER_FOLDERS, read_summaries_by_folder, write_for_analysis
 
 from pathlib import Path
 import json
@@ -22,13 +22,20 @@ class State(TypedDict):# used to define dictionary-like objects with fixed keys 
     process_sys_msg: str
     agent_choice: str
 
-tools = [scan_user_folders_across_drives]
+tools = [scan_user_folders_across_drives, read_summaries_by_folder, write_for_analysis]
 
-# Router
+# Routers
 def router(state:State):
     if state["agent_choice"] == "file":
         return "file"
     return "process"
+
+def proceed(state: State):
+    last_msg = state["processed_q_data"][-1]
+    # Continue if the AIMessage requested tool calls
+    if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
+        return 1
+    return 0
 
 # The nodes
 
@@ -47,9 +54,10 @@ def orchestor(state: State):
 def file_manager(state: State):
     file_llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0)
     llm_tool = file_llm.bind_tools(tools)
+    folders_str = ", ".join(USER_FOLDERS)
     response = llm_tool.invoke([
         SystemMessage(
-            content="""You are a file organization assistant for Windows 10 or later systems.
+            content= f"""You are a file organization assistant for Windows 10 or later systems.
 
             Your responsibility is to help the user by recommending best file organizational practices in order to reduce clutter in their file system
             by analyzing file structure and identifying organizational issues.
@@ -60,10 +68,29 @@ def file_manager(state: State):
             - You do NOT reason about issues during scanning.
             - You use tools exactly as instructed.
             
-            AVAILABLE ACTIONS:
-            1. When the user provides a query, first you will use the scan tool to search for all user folders in the system.
+            Workflow (strict):
+            1.  When the user provides any query, FIRST you call the scan tool. This produces a summaries.json file.
             
-            2. You will 
+            2.  Then, for EACH of the following folders IN THIS ORDER:
+                {folders_str}
+
+                    a. Call the JSON read tool with the folder name.
+                    b. You will receive folder summaries.
+                    c. Structural disorganization indicators include (but are not limited to):
+                        - A very high number of files at the root level with few subfolders
+                        - Many unrelated file extensions mixed together
+                        - Temporary, installer, archive, and document files mixed in the same folder
+                        - The folder acting as a catch-all rather than a categorized container
+                        - if subfolder count is not 0 then it contributes to disorganization
+                        Downloads folders should be treated as disorganized, if they show signs of being used as long-term storage.
+                    d. If and ONLY IF the folder is disorganized, call the write tool. When calling the write tool, you MUST pass a single argument named "data".
+                        The "data" object must contain:
+                        - folder path
+                        - summary
+                    e. If no issue is present, do nothing and move to the next folder.
+                Do NOT load the entire JSON at once. Do NOT invent paths. Do NOT write duplicate paths.
+                If no tool call is needed, you MUST output a normal assistant message.
+                    You must NEVER output an empty response.
             
             3. 
             
@@ -119,8 +146,8 @@ def create_agent():
     graph.set_entry_point("orchestor")
     # Add the flow logic
     graph.add_conditional_edges("orchestor", router, {"file": "file_node", "process": END})
-    graph.add_edge("file_node", "tool_node")
-    graph.add_edge("tool_node", END)# After using tools, go back to thinking
+    graph.add_conditional_edges("file_node", proceed, {1: "tool_node", 0: END})
+    graph.add_edge("tool_node", "file_node")
     return graph.compile()
 
 # Create and use your enhanced agent
@@ -135,7 +162,7 @@ initial_state = {
         parse it into a dictionary with the following key-value pairs...
         1. agent -  which can have value either "process" if query is related to process management work or "file" if query is related to file/dir management in system
         2. processed_query - processed user query which is clear and unambigous such that other llm can work without confusion"""),
-        HumanMessage(content="I want the scanning of my C:\\Users drive")
+        HumanMessage(content="I want the scanning of my systems file structure to organize everything")
     ]
 }
 # final output

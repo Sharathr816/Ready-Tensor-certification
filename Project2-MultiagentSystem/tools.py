@@ -16,7 +16,7 @@ USER_FOLDERS = {
     "Downloads",
     "Pictures",
     "Music",
-    "Musics"
+    "Musics",
     "Videos",
 }
 
@@ -37,7 +37,7 @@ IGNORE_FOLDERS_BY_NAME = {
 }
 
 PROJECT_MARKERS = {
-    ".git",
+
     ".hg",
     ".svn",
     "package.json",
@@ -79,6 +79,13 @@ def has_project_marker(path: str) -> bool:
         return bool(entries & PROJECT_MARKERS)
     except Exception:
         return False
+
+def should_prune_dir(dir_name: str, full_path: str) -> bool:
+    if should_ignore_folder(dir_name):
+        return True
+    if has_project_marker(full_path):
+        return True
+    return False
 
 
 # =========================
@@ -140,11 +147,7 @@ def search_user_folder(root_path: str) -> List[Dict]:
 
 @tool
 def scan_user_folders_across_drives() -> Dict:
-    """
-    Scans for user folders (Desktop, Documents, etc.)
-    across ALL drives and analyzes them up to depth 3.
-    """
-
+    """Scan the system to search user folders in the whole system"""
     results = {}
 
     for drive_letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
@@ -152,14 +155,22 @@ def scan_user_folders_across_drives() -> Dict:
         if not drive_path.exists():
             continue
 
-        for root, dirs, _ in os.walk(drive_path):
+        for root, dirs, _ in os.walk(drive_path, topdown=True):
+            # 🔴 PRUNE FIRST
+            pruned_dirs = [] # list containing dirs which needs trversal
+            for d in dirs:
+                full = os.path.join(root, d)
+                if not should_prune_dir(d, full):
+                    pruned_dirs.append(d)
+            dirs[:] = pruned_dirs  # critical
+
             folder_name = Path(root).name
 
             if folder_name in USER_FOLDERS:
-                key = f"{drive_letter}:{root[len(drive_path.as_posix()):]}"
+                key = root.replace("\\", "/")
                 results[key] = search_user_folder(root)
 
-                # Do NOT keep walking inside once found
+                # stop diving into this user folder
                 dirs.clear()
 
     with open("summaries.json", "w", encoding="utf-8") as f:
@@ -169,3 +180,54 @@ def scan_user_folders_across_drives() -> Dict:
         "status": "Done",
         "file_name": "summaries.json"
     }
+
+@tool
+def read_summaries_by_folder(folder_name: str) -> dict:
+    """
+    Reads summaries.json and returns all entries whose path
+    contains the given folder name (case-insensitive).
+    """
+
+    summaries_file = Path("summaries.json")
+    if not summaries_file.exists():
+        return {
+            "folder": folder_name,
+            "summary": []
+        }
+
+    with summaries_file.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    folder_name_lower = folder_name.lower()
+    matched = {}
+
+    for path_key, summary_list in data.items():
+        if folder_name_lower in path_key.lower():
+            matched[path_key] = summary_list
+
+    return {
+        "folder": f"{folder_name} done",
+        "summary": matched
+    }
+
+@tool
+def write_for_analysis(data: dict) -> dict:
+    '''Writes the folder name and its meta data which needs deep analysis in the future'''
+    path = Path("analysis.json")
+
+    if path.exists() and path.stat().st_size > 0:
+        with path.open("r", encoding="utf-8") as f:
+            existing = json.load(f)
+    else:
+        existing = []
+
+    if not isinstance(existing, list):
+        existing = [existing]
+
+    existing.append(data)
+
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(existing, f, indent=4)
+
+    return {"status": "appended"}
+
