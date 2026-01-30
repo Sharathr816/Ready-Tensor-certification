@@ -21,6 +21,7 @@ class State(TypedDict):# used to define dictionary-like objects with fixed keys 
     file_sys_msg: str
     process_sys_msg: str
     agent_choice: str
+    folder_index: int
 
 tools = [scan_user_folders_across_drives, read_summaries_by_folder, write_for_analysis]
 
@@ -34,8 +35,14 @@ def proceed(state: State):
     last_msg = state["processed_q_data"][-1]
     # Continue if the AIMessage requested tool calls
     if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
-        return 1
-    return 0
+        return "tool"
+    return "advance"
+
+def advance_folder(state: State):
+    # Move to next folder after one full cycle
+    return {
+        "folder_index": state["folder_index"] + 1
+    }
 
 # The nodes
 
@@ -54,7 +61,18 @@ def orchestor(state: State):
 def file_manager(state: State):
     file_llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0)
     llm_tool = file_llm.bind_tools(tools)
-    folders_str = ", ".join(USER_FOLDERS)
+    idx = state["folder_index"]
+
+    # STOP condition handled here
+    if idx > len(USER_FOLDERS):
+        return {
+            "processed_q_data": [],
+            "folder_index": idx
+        }
+
+    current_folder = ""
+    if idx != len(USER_FOLDERS):
+        current_folder = USER_FOLDERS[idx]
     response = llm_tool.invoke([
         SystemMessage(
             content= f"""You are a file organization assistant for Windows 10 or later systems.
@@ -65,29 +83,28 @@ def file_manager(state: State):
             IMPORTANT CONSTRAINTS:
             - You do NOT modify, move, delete, or rename any files or folders.
             - You ONLY analyze file structure and report issues.
-            - You do NOT reason about issues during scanning.
             - You use tools exactly as instructed.
             
             Workflow (strict):
             1.  When the user provides any query, FIRST you call the scan tool. This produces a summaries.json file.
             
-            2.  Then, for EACH of the following folders IN THIS ORDER:
-                {folders_str}
+            2.  Then, for EACH of the following folders:
+                {current_folder}
 
-                    a. Call the JSON read tool with the folder name.
-                    b. You will receive folder summaries.
+                    a. Call the JSON read tool with the folder name for {current_folder} to get folder summaries.
+                    b. when you  receive folder summaries in query, it might contain various paths, look for disorganization with respect to each path.
                     c. Structural disorganization indicators include (but are not limited to):
                         - A very high number of files at the root level with few subfolders
                         - Many unrelated file extensions mixed together
                         - Temporary, installer, archive, and document files mixed in the same folder
                         - The folder acting as a catch-all rather than a categorized container
-                        - if subfolder count is not 0 then it contributes to disorganization
-                        Downloads folders should be treated as disorganized, if they show signs of being used as long-term storage.
-                    d. If and ONLY IF the folder is disorganized, call the write tool. When calling the write tool, you MUST pass a single argument named "data".
+                        - if subfolder count is more than 0 then it should be treated as disorganized
+                        - folders should be treated as disorganized, if they show signs of being used as long-term storage.
+                    d. If and ONLY IF you see disorganization in folder summaries, call the write tool. When calling the write tool, you MUST pass a single argument named "data".
                         The "data" object must contain:
-                        - folder path
-                        - summary
-                    e. If no issue is present, do nothing and move to the next folder.
+                        - folder_paths - list of folder paths
+                        - summary - list of corresponding folder_paths
+                    e. If no issue is present, do not call the write tool.
                 Do NOT load the entire JSON at once. Do NOT invent paths. Do NOT write duplicate paths.
                 If no tool call is needed, you MUST output a normal assistant message.
                     You must NEVER output an empty response.
@@ -111,6 +128,7 @@ def file_tools_node(state: State):
     tool_messages = []
 
     # Execute each tool the agent requested
+    print(last_message.tool_calls)
     for tool_call in last_message.tool_calls:
         tool = tool_registry[tool_call["name"]]
         print(tool_call["name"])
@@ -125,7 +143,7 @@ def file_tools_node(state: State):
         # print(tool_messages)
     print("agent successfully called tools...\n")
 
-    return {"processed_q_data": tool_messages}
+    return {"processed_q_data": state["processed_q_data"] + tool_messages}
 
 
 
@@ -142,11 +160,12 @@ def create_agent():
     graph.add_node("file_node", file_manager)
     graph.add_node("tool_node", file_tools_node)
     graph.add_node("orchestor", orchestor)
+    graph.add_node("advance_node", advance_folder)
     # Set the starting point
     graph.set_entry_point("orchestor")
     # Add the flow logic
     graph.add_conditional_edges("orchestor", router, {"file": "file_node", "process": END})
-    graph.add_conditional_edges("file_node", proceed, {1: "tool_node", 0: END})
+    graph.add_conditional_edges("file_node", proceed, {"tool": "tool_node", "advance": "advance_node"})
     graph.add_edge("tool_node", "file_node")
     return graph.compile()
 
@@ -163,7 +182,8 @@ initial_state = {
         1. agent -  which can have value either "process" if query is related to process management work or "file" if query is related to file/dir management in system
         2. processed_query - processed user query which is clear and unambigous such that other llm can work without confusion"""),
         HumanMessage(content="I want the scanning of my systems file structure to organize everything")
-    ]
+    ],
+"folder_index": 0
 }
 # final output
 result = agent.invoke(initial_state)

@@ -10,15 +10,17 @@ from langchain.tools import tool
 # CONSTANTS (LOCKED)
 # =========================
 
-USER_FOLDERS = {
+USER_FOLDERS = [
     "Desktop",
     "Documents",
     "Downloads",
     "Pictures",
+    "Picture",
     "Music",
     "Musics",
     "Videos",
-}
+    "Video"
+]
 
 MAX_DEPTH = 3
 
@@ -207,12 +209,20 @@ def read_summaries_by_folder(folder_name: str) -> dict:
 
     return {
         "folder": f"{folder_name} done",
-        "summary": matched
+        "summaries": matched
     }
 
 @tool
 def write_for_analysis(data: dict) -> dict:
-    '''Writes the folder name and its meta data which needs deep analysis in the future'''
+    """
+    Expects data in the form:
+    {
+        "folder_paths": [list of folder paths],
+        "summaries": [list of corresponding summaries]
+    }
+    Appends this entry to analysis.json
+    """
+
     path = Path("analysis.json")
 
     if path.exists() and path.stat().st_size > 0:
@@ -224,7 +234,13 @@ def write_for_analysis(data: dict) -> dict:
     if not isinstance(existing, list):
         existing = [existing]
 
-    existing.append(data)
+    # minimal validation
+    entry = {
+        "folder_paths": data.get("folder_paths", []),
+        "summaries": data.get("summaries", [])
+    }
+
+    existing.append(entry)
 
     with path.open("w", encoding="utf-8") as f:
         json.dump(existing, f, indent=4)
