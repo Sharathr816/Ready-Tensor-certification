@@ -15,13 +15,17 @@ load_dotenv()
 
 
 # Define your agent's state - this is your agent's memory
-class State(TypedDict):# used to define dictionary-like objects with fixed keys and types.
+class State(TypedDict):
+    # routing / orchestration
     user_query: Annotated[list, add_messages]
-    processed_q_data: Annotated[list, add_messages]
+    agent_choice: str
     file_sys_msg: str
     process_sys_msg: str
-    agent_choice: str
+
+    # file-analysis specific
     folder_index: int
+    messages: Annotated[list, add_messages]
+    phase: str
 
 tools = [scan_user_folders_across_drives, read_summaries_by_folder, write_for_analysis]
 
@@ -31,18 +35,14 @@ def router(state:State):
         return "file"
     return "process"
 
+# router for file_manager
 def proceed(state: State):
-    last_msg = state["processed_q_data"][-1]
+    last_msg = state["messages"][-1]
     # Continue if the AIMessage requested tool calls
     if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
         return "tool"
-    return "advance"
+    return "end"
 
-def advance_folder(state: State):
-    # Move to next folder after one full cycle
-    return {
-        "folder_index": state["folder_index"] + 1
-    }
 
 # The nodes
 
@@ -86,7 +86,8 @@ def file_manager(state: State):
             - You use tools exactly as instructed.
             
             Workflow (strict):
-            1.  When the user provides any query, FIRST you call the scan tool. This produces a summaries.json file.
+            1.  When the user provides any query, FIRST you call the scan tool. This produces a summaries.json file, if summaries.json already
+            exists then dont call the scan tool.
             
             2.  Then, for EACH of the following folders:
                 {current_folder}
@@ -158,14 +159,13 @@ def create_agent():
     graph = StateGraph(State)
     # Add the nodes
     graph.add_node("file_node", file_manager)
-    graph.add_node("tool_node", file_tools_node)
+    graph.add_node("file_tool", file_tools_node)
     graph.add_node("orchestor", orchestor)
-    graph.add_node("advance_node", advance_folder)
     # Set the starting point
     graph.set_entry_point("orchestor")
     # Add the flow logic
     graph.add_conditional_edges("orchestor", router, {"file": "file_node", "process": END})
-    graph.add_conditional_edges("file_node", proceed, {"tool": "tool_node", "advance": "advance_node"})
+    graph.add_conditional_edges("file_node", proceed, {"tool": "tool_node", "end": END})
     graph.add_edge("tool_node", "file_node")
     return graph.compile()
 
@@ -183,7 +183,8 @@ initial_state = {
         2. processed_query - processed user query which is clear and unambigous such that other llm can work without confusion"""),
         HumanMessage(content="I want the scanning of my systems file structure to organize everything")
     ],
-"folder_index": 0
+"folder_index": 0,
+"phase": "scan"
 }
 # final output
 result = agent.invoke(initial_state)
