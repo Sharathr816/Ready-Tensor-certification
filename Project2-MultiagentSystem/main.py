@@ -26,26 +26,32 @@ class State(TypedDict):
     folder_index: int
     messages: Annotated[list, add_messages]
     phase: str
+    current_summary: dict | None
 
 tools = [scan_user_folders_across_drives, read_summaries_by_folder, write_for_analysis]
 
+
 # Routers
+#orchestor
 def router(state:State):
     if state["agent_choice"] == "file":
         return "file"
     return "process"
 
-# router for file_manager
+# file_manager
 def proceed(state: State):
+    if state["folder_index"] >= len(USER_FOLDERS):
+        return "end"
+
     last_msg = state["messages"][-1]
-    # Continue if the AIMessage requested tool calls
     if isinstance(last_msg, AIMessage) and last_msg.tool_calls:
         return "tool"
-    return "end"
+
+    return "file"   # continue to next folder
+
 
 
 # The nodes
-
 # orchestor
 def orchestor(state: State):
     orc_llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0)
@@ -54,7 +60,7 @@ def orchestor(state: State):
     clean = response.content.strip().removeprefix("```json").removesuffix("```").strip()
     data = json.loads(clean)
     print(data["processed_query"])
-    return {"agent_choice": data["agent"], "processed_q_data": [HumanMessage(content=data["processed_query"])]}
+    return {"agent_choice": data["agent"], "messages": [HumanMessage(content=data["processed_query"])]}
 
 
 # File managing nodes
@@ -62,74 +68,101 @@ def file_manager(state: State):
     file_llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0)
     llm_tool = file_llm.bind_tools(tools)
     idx = state["folder_index"]
+    phase = state["phase"]
 
-    # STOP condition handled here
-    if idx > len(USER_FOLDERS):
+    folder = USER_FOLDERS[idx]
+
+    # phase 1 -> Scan
+    if phase == "scan":
+        msg = llm_tool.invoke([
+            SystemMessage(
+                content=f"""
+                Call the scan tool to search for user folder in the system drives.
+                """
+            )
+        ])
         return {
-            "processed_q_data": [],
-            "folder_index": idx
+            "messages": [msg], # no context maintained here
+            "phase": "read"
         }
 
-    current_folder = ""
-    if idx != len(USER_FOLDERS):
-        current_folder = USER_FOLDERS[idx]
-    response = llm_tool.invoke([
-        SystemMessage(
-            content= f"""You are a file organization assistant for Windows 10 or later systems.
+    # PHASE 2 → READ
+    if phase == "read":
+        msg = llm_tool.invoke([
+            SystemMessage(
+                content=f"""
+                Call the tool read_summaries_by_folder for folder: {folder}.
+                Do not make any decision yet.
+                """
+            )
+        ])
+        return {
+            "messages": [msg],
+            "phase": "decide"
+        }
 
-            Your responsibility is to help the user by recommending best file organizational practices in order to reduce clutter in their file system
-            by analyzing file structure and identifying organizational issues.
-            
-            IMPORTANT CONSTRAINTS:
-            - You do NOT modify, move, delete, or rename any files or folders.
-            - You ONLY analyze file structure and report issues.
-            - You use tools exactly as instructed.
-            
-            Workflow (strict):
-            1.  When the user provides any query, FIRST you call the scan tool. This produces a summaries.json file, if summaries.json already
-            exists then dont call the scan tool.
-            
-            2.  Then, for EACH of the following folders:
-                {current_folder}
+    # PHASE 3 → DECIDE + OPTIONAL WRITE
+    msg = llm_tool.invoke([
+            SystemMessage(
+                content=f"""
+                Folder under analysis: {folder}
+                
+                Summary:
+                {json.dumps(state["current_summary"], indent=2)}
+                
+                You are analyzing file organization for a Windows 10+ user.
 
-                    a. Call the JSON read tool with the folder name for {current_folder} to get folder summaries.
-                    b. when you  receive folder summaries in query, it might contain various paths, look for disorganization with respect to each path.
-                    c. Structural disorganization indicators include (but are not limited to):
-                        - A very high number of files at the root level with few subfolders
-                        - Many unrelated file extensions mixed together
-                        - Temporary, installer, archive, and document files mixed in the same folder
-                        - The folder acting as a catch-all rather than a categorized container
-                        - if subfolder count is more than 0 then it should be treated as disorganized
-                        - folders should be treated as disorganized, if they show signs of being used as long-term storage.
-                    d. If and ONLY IF you see disorganization in folder summaries, call the write tool. When calling the write tool, you MUST pass a single argument named "data".
-                        The "data" object must contain:
-                        - folder_paths - list of folder paths
-                        - summary - list of corresponding folder_paths
-                    e. If no issue is present, do not call the write tool.
-                Do NOT load the entire JSON at once. Do NOT invent paths. Do NOT write duplicate paths.
-                If no tool call is needed, you MUST output a normal assistant message.
-                    You must NEVER output an empty response.
-            
-            3. 
-            
-            GOAL:
-            Your goal is to produce accurate, deterministic analysis of file organization
-            and resolve the clutter and file organizational problems present in user system.
-            """),
-        *state["processed_q_data"] # * means expanding the list
-    ])
+                You are given folder summaries for ONE logical user folder (e.g., Desktop, Downloads etc..,).
+                
+                Your task:
+                - Inspect each path independently.
+                - Decide whether it is structurally disorganized for a normal Windows user.
+                
+                Disorganization indicators include:
+                - Many files at root level
+                - Many extensions with Mixed unrelated extensions
+                - Subfolder count > 0 
+                
+                Ignore:
+                - Software installation paths
+                - SDKs, build outputs, package directories
+                - System-managed folders
+                
+                If at least one path is disorganized:
+                - Call write_for_analysis ONCE.
+                - Pass:
+                  - folder_paths: list of disorganized paths only
+                  - summary: corresponding summaries
+                
+                If no path is disorganized:
+                - Do NOT call any tool.
+                - Respond with a normal assistant message.
+                
+                You must NOT stop execution early.
+                You must NOT decide control flow.
+                """
+                                    )
+                                ])
     print("agent responded...")
-    return {"processed_q_data":response}
+    return {
+            "messages": [msg],
+            "phase": "read",
+            "folder_index": idx + 1,
+            "current_summary": None
+        }
+
+
 
 def file_tools_node(state: State):
     """Your agent's hands - executes the chosen tools."""
     tool_registry = {tool.name: tool for tool in tools}# {"Duck_search": duckduckgoToolObject}
 
-    last_message = state["processed_q_data"][-1]# consists of the ai message
+    last_message = state["messages"][-1]# consists of the ai message
     tool_messages = []
+    updates = {}
 
     # Execute each tool the agent requested
-    print(last_message.tool_calls)
+    # print(last_message.tool_calls)
     for tool_call in last_message.tool_calls:
         tool = tool_registry[tool_call["name"]]
         print(tool_call["name"])
@@ -141,10 +174,19 @@ def file_tools_node(state: State):
             content=result,
             tool_call_id=tool_call["id"]
         ))
-        # print(tool_messages)
+
+        # Capture read result
+        if tool_call["name"] == "read_summaries_by_folder":
+            updates["current_summary"] = result
+
+    # print(tool_messages)
     print("agent successfully called tools...\n")
 
-    return {"processed_q_data": state["processed_q_data"] + tool_messages}
+    return {
+        "messages": state["messages"] + tool_messages,
+        **updates
+}
+
 
 
 
@@ -165,8 +207,8 @@ def create_agent():
     graph.set_entry_point("orchestor")
     # Add the flow logic
     graph.add_conditional_edges("orchestor", router, {"file": "file_node", "process": END})
-    graph.add_conditional_edges("file_node", proceed, {"tool": "tool_node", "end": END})
-    graph.add_edge("tool_node", "file_node")
+    graph.add_conditional_edges("file_node", proceed, {"file": "file_node", "tool": "file_tool", "end": END})
+    graph.add_edge("file_tool", "file_node")
     return graph.compile()
 
 # Create and use your enhanced agent
@@ -185,7 +227,12 @@ initial_state = {
     ],
 "folder_index": 0,
 "phase": "scan"
+
 }
 # final output
-result = agent.invoke(initial_state)
-print(result["processed_q_data"][-1].content)
+result = agent.invoke(initial_state, config={"recursion_limit": 100})
+print(result["messages"][-1].content)
+
+
+"""
+"""

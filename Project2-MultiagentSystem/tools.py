@@ -179,7 +179,7 @@ def scan_user_folders_across_drives() -> Dict:
         json.dump(results, f, indent=4)
 
     return {
-        "status": "Done",
+        "status": "Scan Done",
         "file_name": "summaries.json"
     }
 
@@ -208,7 +208,7 @@ def read_summaries_by_folder(folder_name: str) -> dict:
             matched[path_key] = summary_list
 
     return {
-        "folder": f"{folder_name} done",
+        "folder": folder_name,
         "summaries": matched
     }
 
