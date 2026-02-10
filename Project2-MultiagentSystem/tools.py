@@ -56,7 +56,7 @@ PROJECT_MARKERS = {
     "readme.md",
 }
 
-MAX_EXTENSION_TYPES = 10
+MAX_EXTENSION_TYPES = 15
 
 
 # =========================
@@ -83,18 +83,24 @@ def has_project_marker(path: str) -> bool:
         return False
 
 def should_prune_dir(dir_name: str, full_path: str) -> bool:
+    """Ignore unnecessary folders (irrelevant to the user for organization)"""
     if should_ignore_folder(dir_name):
         return True
     if has_project_marker(full_path):
         return True
     return False
 
+def matches_user_folder(folder_name: str, target: str) -> bool:
+    """to search folders consisting even part of the target name in folder_name"""
+    return target.lower() in folder_name.lower()
+
+
 
 # =========================
 # CORE TRAVERSAL
 # =========================
 
-def search_user_folder(root_path: str) -> List[Dict]:
+def analyse_user_folder(root_path: str) -> List[Dict]:
     """
     Analyzes ONLY the user folder itself.
     Does NOT recurse into subfolders.
@@ -157,23 +163,28 @@ def scan_user_folders_across_drives() -> Dict:
         if not drive_path.exists():
             continue
 
-        for root, dirs, _ in os.walk(drive_path, topdown=True):
+        for root, dirs, _ in os.walk(drive_path, topdown=True): #
+            """os.walk recurse deeper into folders, returns full path, dirs and files within.
+            if root is c:// pics then dirs consists of all folders within pics"""
             # 🔴 PRUNE FIRST
-            pruned_dirs = [] # list containing dirs which needs trversal
-            for d in dirs:
+            pruned_dirs = []
+            for d in dirs: # deciding on relevant dirs for traversal
                 full = os.path.join(root, d)
                 if not should_prune_dir(d, full):
                     pruned_dirs.append(d)
-            dirs[:] = pruned_dirs  # critical
+            dirs[:] = pruned_dirs  # critical - keep only the dirs where we can find user folders
 
-            folder_name = Path(root).name
+            folder_name = Path(root).name # Extracts last folder or file name from the path name
 
-            if folder_name in USER_FOLDERS:
-                key = root.replace("\\", "/")
-                results[key] = search_user_folder(root)
+            for user_folder in USER_FOLDERS:
+                if matches_user_folder(folder_name, user_folder):
+                    key = root.replace("\\", "/")
+                    results[key] = analyse_user_folder(root)
 
-                # stop diving into this user folder
-                dirs.clear()
+                    """Deeper analysis can be done here (use os.walk)"""
+                    # stop diving into this user folder (stops os.walk at user folder)
+                    dirs.clear()
+                    break
 
     with open("summaries.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=4)
@@ -220,11 +231,14 @@ def write_for_analysis(data: dict) -> dict:
         "folder_paths": [list of folder paths],
         "summaries": [list of corresponding summaries]
     }
-    Appends this entry to analysis.json
+
+    Appends ONLY new paths to analysis.json
+    (skips paths already present anywhere in the file)
     """
 
     path = Path("analysis.json")
 
+    # Load existing data
     if path.exists() and path.stat().st_size > 0:
         with path.open("r", encoding="utf-8") as f:
             existing = json.load(f)
@@ -234,16 +248,44 @@ def write_for_analysis(data: dict) -> dict:
     if not isinstance(existing, list):
         existing = [existing]
 
-    # minimal validation
-    entry = {
-        "folder_paths": data.get("folder_paths", []),
-        "summaries": data.get("summaries", [])
-    }
+    # Collect all existing folder paths (flattened)
+    existing_paths = set()
+    for entry in existing:
+        for p in entry.get("folder_paths", []):
+            existing_paths.add(p)
 
-    existing.append(entry)
+    # Incoming data
+    incoming_paths = data.get("folder_paths", [])
+    incoming_summaries = data.get("summaries", [])
+
+    # Filter out already-existing paths
+    new_paths = []
+    new_summaries = []
+
+    for p, s in zip(incoming_paths, incoming_summaries):
+        if p not in existing_paths:
+            new_paths.append(p)
+            new_summaries.append(s)
+
+    # If nothing new, do not write
+    if not new_paths:
+        return {
+            "status": "skipped",
+            "reason": "all paths already exist"
+        }
+
+    # Append only new data
+    existing.append({
+        "folder_paths": new_paths,
+        "summaries": new_summaries
+    })
 
     with path.open("w", encoding="utf-8") as f:
         json.dump(existing, f, indent=4)
 
-    return {"status": "appended"}
+    return {
+        "status": "appended",
+        "new_paths_count": len(new_paths)
+    }
+
 

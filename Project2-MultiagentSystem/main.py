@@ -26,9 +26,19 @@ class State(TypedDict):
     folder_index: int
     messages: Annotated[list, add_messages]
     phase: str
+    # summary handling - (chunk the user folder related summaries)
     current_summary: dict | None
+    summary_chunks: list | None
+    chunk_index: int
 
 tools = [scan_user_folders_across_drives, read_summaries_by_folder, write_for_analysis]
+
+
+#helper
+def chunk_dict(d: dict, size: int = 5):
+    items = list(d.items())
+    for i in range(0, len(items), size):
+        yield dict(items[i:i + size])
 
 
 # Routers
@@ -82,7 +92,7 @@ def file_manager(state: State):
             )
         ])
         return {
-            "messages": [msg], # no context maintained here
+            "messages": [msg],
             "phase": "read"
         }
 
@@ -98,58 +108,82 @@ def file_manager(state: State):
         ])
         return {
             "messages": [msg],
-            "phase": "decide"
+            "phase": "decide",
+            "chunk_index": 0,
         }
 
-    # PHASE 3 → DECIDE + OPTIONAL WRITE
-    msg = llm_tool.invoke([
-            SystemMessage(
-                content=f"""
-                Folder under analysis: {folder}
-                
-                Summary:
-                {json.dumps(state["current_summary"], indent=2)}
-                
-                You are analyzing file organization for a Windows 10+ user.
+    #phase -> decide (Batched calling)
+    if phase == "decide":
+        chunks = state["summary_chunks"]
+        i = state["chunk_index"]
 
-                You are given folder summaries for ONE logical user folder (e.g., Desktop, Downloads etc..,).
-                
-                Your task:
-                - Inspect each path independently.
-                - Decide whether it is structurally disorganized for a normal Windows user.
-                
-                Disorganization indicators include:
-                - Many files at root level
-                - Many extensions with Mixed unrelated extensions
-                - Subfolder count > 0 
-                
-                Ignore:
-                - Software installation paths
-                - SDKs, build outputs, package directories
-                - System-managed folders
-                
-                If at least one path is disorganized:
-                - Call write_for_analysis ONCE.
-                - Pass:
-                  - folder_paths: list of disorganized paths only
-                  - summary: corresponding summaries
-                
-                If no path is disorganized:
-                - Do NOT call any tool.
-                - Respond with a normal assistant message.
-                
-                You must NOT stop execution early.
-                You must NOT decide control flow.
-                """
-                                    )
-                                ])
-    print("agent responded...")
-    return {
+        # finished all chunks for this folder
+        if i >= len(chunks):
+            return {
+                "phase": "read",
+                "folder_index": idx + 1,
+                "current_summary": None,
+                "summary_chunks": None,
+                "chunk_index": 0
+            }
+
+        current_chunk = chunks[i]
+        msg = llm_tool.invoke([
+                SystemMessage(
+                    content=f"""
+                    Folder under analysis: {folder}
+                    
+                    Batch summary:
+                    {json.dumps(current_chunk, indent=2)}
+                    
+                    You are analyzing file organization for a Windows 10+ user.
+                    You are given folder summaries for MULTIPLE paths
+                    
+                    Your task:
+                    - Inspect each path independently.
+                    - Decide whether it should be ignored for a normal Windows user.
+                       
+                    Ignore Rules (To be followed strictly):
+                        Operating system core directories
+                        Application installation directories
+                        Runtime, framework, or language environments bundled with applications
+                        Software update, patching, or auto-generated support folders
+                        Dependency, package, or library directories managed by tools
+                        Build outputs, compiled artifacts, or internal resource folders
+                        Application cache, logs, metadata, configuration, or documentation folders
+                        Security, antivirus, backup, or system protection data
+                        Default or template user profiles
+                        Cloud-sync service internal folders and placeholders
+                        Framework, platform, or tool-specific internal directories
+                        Hidden or system-marked folders unless explicitly user-created
+                    
+                    Not to be ignored rules:
+                        Personal or public user folders
+                        (Desktop, Downloads, Documents, Pictures, Music, Videos)
+                        User-created folders on internal or external drives
+                        (including personal project folders, media collections, archives)
+                        Any folder primarily containing user-authored content
+                        (files the user downloads, creates, edits, or organizes manually)
+                    
+                    If at least one path is not to be ignored:
+                    - Call write_for_analysis ONCE.
+                    - Pass:
+                      - folder_paths: list of paths not to be ignored
+                      - summary: corresponding summaries
+                    
+                    If all paths are to be ignored then:
+                    - Do NOT call any tool.
+                    - Respond with a normal assistant message.
+                    """
+                                        )
+                                    ])
+        print("agent responded...")
+        return {
             "messages": [msg],
-            "phase": "read",
-            "folder_index": idx + 1,
-            "current_summary": None
+            "chunk_index": i + 1
         }
+
+
 
 
 
@@ -177,7 +211,9 @@ def file_tools_node(state: State):
 
         # Capture read result
         if tool_call["name"] == "read_summaries_by_folder":
-            updates["current_summary"] = result
+            summary = result
+            updates["current_summary"] = summary
+            updates["summary_chunks"] = list(chunk_dict(summary, size=3))
 
     # print(tool_messages)
     print("agent successfully called tools...\n")
