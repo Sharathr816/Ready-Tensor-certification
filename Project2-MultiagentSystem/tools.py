@@ -165,7 +165,7 @@ def scan_user_folders_across_drives() -> Dict:
 
         for root, dirs, _ in os.walk(drive_path, topdown=True): #
             """os.walk recurse deeper into folders, returns full path, dirs and files within.
-            if root is c:// pics then dirs consists of all folders within pics"""
+            if root is c://pics then dirs consists of all folders within pics"""
             # 🔴 PRUNE FIRST
             pruned_dirs = []
             for d in dirs: # deciding on relevant dirs for traversal
@@ -198,7 +198,7 @@ def scan_user_folders_across_drives() -> Dict:
 def read_summaries_by_folder(folder_name: str) -> dict:
     """
     Reads summaries.json and returns all entries whose path
-    contains the given folder name (case-insensitive).
+    contains the given folder_name (case-insensitive).
     """
 
     summaries_file = Path("summaries.json")
@@ -287,5 +287,6 @@ def write_for_analysis(data: dict) -> dict:
         "status": "appended",
         "new_paths_count": len(new_paths)
     }
+
 
 

@@ -35,7 +35,7 @@ tools = [scan_user_folders_across_drives, read_summaries_by_folder, write_for_an
 
 
 #helper
-def chunk_dict(d: dict, size: int = 5):
+def chunk_dict(d: dict, size: int = 5): #Chunking wrt items size
     items = list(d.items())
     for i in range(0, len(items), size):
         yield dict(items[i:i + size])
@@ -113,7 +113,8 @@ def file_manager(state: State):
         }
 
     #phase -> decide (Batched calling)
-    if phase == "decide":
+    if phase == "decide": # filter unwanted paths from summaries.json entries
+        # checks "Is this path relevant to user?"
         chunks = state["summary_chunks"]
         i = state["chunk_index"]
 
